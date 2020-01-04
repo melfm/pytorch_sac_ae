@@ -23,7 +23,14 @@ class EnvWrapper(gym.Wrapper):
 
     def __init__(self, make_env, eps_length):
         self.env = make_env()
-        self.eps_length = eps_length if eps_length else self.env._max_episode_steps
+        if eps_length:
+            self.eps_length = eps_length
+        elif "_max_episode_steps" in self.env.__dict__:
+            self.eps_length = self.env._max_episode_steps
+        elif "max_path_length" in self.env.__dict__:
+            self.eps_length = self.env.max_path_length
+        else:
+            assert False, "max episode length unknown."
 
         self.action_space = self.env.action_space
         self.frame_size = 84
