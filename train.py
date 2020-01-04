@@ -8,7 +8,7 @@ import sys
 import random
 import time
 import json
-import dmc2gym
+#import dmc2gym
 import copy
 
 import utils
@@ -16,7 +16,8 @@ from logger import Logger
 from video import VideoRecorder
 
 from sac_ae import SacAeAgent
-
+from metaworld.benchmarks import ML1
+from metaworld.envs.mujoco.sawyer_xyz.sawyer_reach_push_pick_place import SawyerReachPushPickPlaceEnv
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -135,16 +136,18 @@ def main():
     args = parse_args()
     utils.set_seed_everywhere(args.seed)
 
-    env = dmc2gym.make(
-        domain_name=args.domain_name,
-        task_name=args.task_name,
-        seed=args.seed,
-        visualize_reward=False,
-        from_pixels=(args.encoder_type == 'pixel'),
-        height=args.image_size,
-        width=args.image_size,
-        frame_skip=args.action_repeat
-    )
+
+    env = SawyerReachPushPickPlaceEnv()
+    # env = dmc2gym.make(
+    #     domain_name=args.domain_name,
+    #     task_name=args.task_name,
+    #     seed=args.seed,
+    #     visualize_reward=False,
+    #     from_pixels=(args.encoder_type == 'pixel'),
+    #     height=args.image_size,
+    #     width=args.image_size,
+    #     frame_skip=args.action_repeat
+    # )
     env.seed(args.seed)
 
     # stack several consecutive frames together
@@ -164,8 +167,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # the dmc2gym wrapper standardizes actions
-    assert env.action_space.low.min() >= -1
-    assert env.action_space.high.max() <= 1
+
+    # assert env.action_space.low.min() >= -1
+    # assert env.action_space.high.max() <= 1
 
     replay_buffer = utils.ReplayBuffer(
         obs_shape=env.observation_space.shape,

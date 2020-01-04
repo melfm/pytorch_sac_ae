@@ -18,11 +18,16 @@ class VideoRecorder(object):
 
     def record(self, env):
         if self.enabled:
+            # frame = env.render(
+            #     mode='rgb_array',
+            #     height=self.height,
+            #     width=self.width,
+            #     camera_id=self.camera_id
+            # )
             frame = env.render(
                 mode='rgb_array',
                 height=self.height,
-                width=self.width,
-                camera_id=self.camera_id
+                width=self.width
             )
             self.frames.append(frame)
 
