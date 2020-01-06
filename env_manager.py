@@ -18,13 +18,20 @@ try:
 except:
     dmc2gym = None
 
-class EnvWrapper(gym.Wrapper):
-    """Wrapper of the DMSuite and Metaworld environments
+class EnvWrapperPixel(gym.Wrapper):
+    """Wrapper of the DMSuite and Metaworld pixel based environments
     """
 
     def __init__(self, make_env, eps_length):
         self.env = make_env()
-        self.eps_length = eps_length if eps_length else self.env._max_episode_steps
+        if eps_length:
+            self.eps_length = eps_length
+        elif "_max_episode_steps" in self.env.__dict__:
+            self.eps_length = self.env._max_episode_steps
+        elif "max_path_length" in self.env.__dict__:
+            self.eps_length = self.env.max_path_length
+        else:
+            assert False, "max episode length unknown."
 
         self.action_space = self.env.action_space
         self.frame_size = 84
@@ -49,6 +56,60 @@ class EnvWrapper(gym.Wrapper):
 
     def close(self):
         return self.env.close()
+
+class EnvWrapper(gym.Wrapper):
+    """Wrapper of the DMSuite and Metaworld pixel and control based environments.
+    Plus the outputs are dictionary-based to work with the demo generator.
+    """
+
+    def __init__(self, make_env, eps_length):
+        self.env = make_env()
+        if eps_length:
+            self.eps_length = eps_length
+        elif "_max_episode_steps" in self.env.__dict__:
+            self.eps_length = self.env._max_episode_steps
+        elif "max_path_length" in self.env.__dict__:
+            self.eps_length = self.env.max_path_length
+        else:
+            assert False, "max episode length unknown."
+
+        self.action_space = self.env.action_space
+        self.frame_size = 84
+        self.observation_space = self.env.observation_space
+        self.max_u = self.action_space.high[0]
+
+
+    def reset(self, **kwargs):
+        state = self.env.reset(**kwargs)
+        pixel_state = self.env.render(mode='rgb_array', width = self.frame_size, height=self.frame_size)
+        pixel_state = pixel_state.reshape(3, pixel_state.shape[0], pixel_state.shape[1])
+        return self._transform_state(state, pixel_state)
+
+    def render(self, **kwargs):
+        return self.env.render(**kwargs)
+
+    def seed(self, seed=0):
+        return self.env.seed(seed)
+
+    def step(self, action):
+        state, r, done, info = self.env.step(action)
+        pixel_state = self.env.render(mode='rgb_array', width = self.frame_size, height=self.frame_size)
+        pixel_state = pixel_state.reshape(3, pixel_state.shape[0], pixel_state.shape[1])
+        return self._transform_state(state, pixel_state), r, done, info
+
+    def close(self):
+        return self.env.close()
+
+    def _transform_state(self, state, pixels):
+        """
+        modify state to contain: observation, achieved_goal, desired_goal
+        """
+        if not type(state) == dict:
+            state = {"observation": state,
+                      "pixel_obs": pixels,
+                      "achieved_goal": np.empty(0), "desired_goal": np.empty(0)}
+        return state
+
 
 class EnvManager:
     def __init__(self, env_pkg, env_name, env_args={}, eps_length=50):
@@ -81,17 +142,16 @@ class EnvManager:
                     kwargs["random_init"] = False  # disable random goal locations
                     kwargs["obs_type"] = "with_goal"  # disable random goal locations
                     env = mtw_envs[env_name](*args, **kwargs)
-
-                    # The metaworld env wrapper is missing `_state_goal_idx`
-                    # make sure this is set to plain to avoid concatenating the goal
-                    # since we are pixel-based anyway.
-                    env.obs_type = "plain"
                     return env
 
                 self.make_env = make_env
 
-    def get_env(self):
-        return EnvWrapper(self.make_env, self.eps_length)
+    def get_env(self, pixel_only_based=True):
+        if pixel_only_based:
+            return EnvWrapperPixel(self.make_env, self.eps_length)
+        else:
+            return EnvWrapper(self.make_env, self.eps_length)
+
 
 
 if __name__ == "__main__":
