@@ -3,6 +3,7 @@ import numpy as np
 try:
     import gym
     from gym.spaces import  Dict , Box
+    # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.mujoco/mujoco200/bin
     from metaworld.envs.mujoco.env_dict import HARD_MODE_ARGS_KWARGS, HARD_MODE_CLS_DICT
 
     mtw_envs = {**HARD_MODE_CLS_DICT["train"], **HARD_MODE_CLS_DICT["test"]}
@@ -96,16 +97,16 @@ class EnvManager:
 if __name__ == "__main__":
     from PIL import Image
 
-    env_manager = EnvManager(env_pkg="metaworld", env_name="pick-place-v1")
+    env_manager = EnvManager(env_pkg="metaworld", env_name="drawer-open-v1")
     env = env_manager.get_env()
 
     obs = env.reset()
     print('Stepping through the env and storing frames .... \n')
-    for i in range(50):
+    for i in range(1000):
         a = env.action_space.sample()
         obs, reward, done, info = env.step(a)
-
+        img = env.render(mode='rgb_array')
         name = 'robot_obs_' + str(i) + '.png'
-        im = Image.fromarray(obs)
+        im = Image.fromarray(img)
         im.save(name)
 
