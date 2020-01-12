@@ -8,6 +8,7 @@ import sys
 import random
 import time
 import json
+import dmc2gym
 import copy
 
 import utils
@@ -15,7 +16,7 @@ from logger import Logger
 from video import VideoRecorder
 
 from sac_ae import SacAeAgent
-from env_manager import EnvManager
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -26,7 +27,7 @@ def parse_args():
     parser.add_argument('--action_repeat', default=1, type=int)
     parser.add_argument('--frame_stack', default=3, type=int)
     # replay buffer
-    parser.add_argument('--replay_buffer_capacity', default=1000000, type=int)
+    parser.add_argument('--replay_buffer_capacity', default=500000, type=int)
     # train
     parser.add_argument('--agent', default='sac_ae', type=str)
     parser.add_argument('--init_steps', default=1000, type=int)
@@ -71,6 +72,10 @@ def parse_args():
     parser.add_argument('--save_model', default=False, action='store_true')
     parser.add_argument('--save_buffer', default=False, action='store_true')
     parser.add_argument('--save_video', default=False, action='store_true')
+
+    # Behaviour cloning
+    parser.add_argument('--bc_learning', default=False, action='store_true')
+    parser.add_argument('--expert_dir', type=str)
 
     args = parser.parse_args()
     return args
@@ -124,7 +129,8 @@ def make_agent(obs_shape, action_shape, args, device):
             decoder_latent_lambda=args.decoder_latent_lambda,
             decoder_weight_lambda=args.decoder_weight_lambda,
             num_layers=args.num_layers,
-            num_filters=args.num_filters
+            num_filters=args.num_filters,
+            behaviour_cloning=args.bc_learning
         )
     else:
         assert 'agent is not supported: %s' % args.agent
@@ -134,10 +140,16 @@ def main():
     args = parse_args()
     utils.set_seed_everywhere(args.seed)
 
-
-    env_manager = EnvManager(env_pkg="metaworld", env_name="pick-place-v1")
-    env = env_manager.get_env()
-
+    env = dmc2gym.make(
+        domain_name=args.domain_name,
+        task_name=args.task_name,
+        seed=args.seed,
+        visualize_reward=False,
+        from_pixels=(args.encoder_type == 'pixel'),
+        height=args.image_size,
+        width=args.image_size,
+        frame_skip=args.action_repeat
+    )
     env.seed(args.seed)
 
     # stack several consecutive frames together
@@ -149,6 +161,9 @@ def main():
     model_dir = utils.make_dir(os.path.join(args.work_dir, 'model'))
     buffer_dir = utils.make_dir(os.path.join(args.work_dir, 'buffer'))
 
+    if args.bc_learning:
+        expert_dir = utils.make_dir(os.path.join(args.expert_dir, 'model'))
+
     video = VideoRecorder(video_dir if args.save_video else None)
 
     with open(os.path.join(args.work_dir, 'args.json'), 'w') as f:
@@ -157,9 +172,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # the dmc2gym wrapper standardizes actions
-
-    # assert env.action_space.low.min() >= -1
-    # assert env.action_space.high.max() <= 1
+    assert env.action_space.low.min() >= -1
+    assert env.action_space.high.max() <= 1
 
     replay_buffer = utils.ReplayBuffer(
         obs_shape=env.observation_space.shape,
@@ -175,6 +189,10 @@ def main():
         args=args,
         device=device
     )
+
+    if args.bc_learning:
+        step = 160000
+        agent.load_expert(expert_dir, step)
 
     L = Logger(args.work_dir, use_tb=args.save_tb)
 

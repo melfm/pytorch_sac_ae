@@ -47,6 +47,7 @@ def weight_init(m):
 
 class Actor(nn.Module):
     """MLP actor network."""
+
     def __init__(
         self, obs_shape, action_shape, hidden_dim, encoder_type,
         encoder_feature_dim, log_std_min, log_std_max, num_layers, num_filters
@@ -117,6 +118,7 @@ class Actor(nn.Module):
 
 class QFunction(nn.Module):
     """MLP for q-function."""
+
     def __init__(self, obs_dim, action_dim, hidden_dim):
         super().__init__()
 
@@ -135,12 +137,12 @@ class QFunction(nn.Module):
 
 class Critic(nn.Module):
     """Critic network, employes two q-functions."""
+
     def __init__(
         self, obs_shape, action_shape, hidden_dim, encoder_type,
         encoder_feature_dim, num_layers, num_filters
     ):
         super().__init__()
-
 
         self.encoder = make_encoder(
             encoder_type, obs_shape, encoder_feature_dim, num_layers,
@@ -185,6 +187,7 @@ class Critic(nn.Module):
 
 class SacAeAgent(object):
     """SAC+AE algorithm."""
+
     def __init__(
         self,
         obs_shape,
@@ -214,7 +217,8 @@ class SacAeAgent(object):
         decoder_latent_lambda=0.0,
         decoder_weight_lambda=0.0,
         num_layers=4,
-        num_filters=32
+        num_filters=32,
+        behaviour_cloning=False
     ):
         self.device = device
         self.discount = discount
@@ -224,12 +228,24 @@ class SacAeAgent(object):
         self.critic_target_update_freq = critic_target_update_freq
         self.decoder_update_freq = decoder_update_freq
         self.decoder_latent_lambda = decoder_latent_lambda
+        self.behaviour_cloning = behaviour_cloning
+
+        self.polyak_noise = 0.0
+        self.max_u = 1.0
+        self.random_eps = 0.0
 
         self.actor = Actor(
             obs_shape, action_shape, hidden_dim, encoder_type,
             encoder_feature_dim, actor_log_std_min, actor_log_std_max,
             num_layers, num_filters
         ).to(device)
+
+        if self.behaviour_cloning:
+            self.actor_expert = Actor(
+                obs_shape, action_shape, hidden_dim, encoder_type,
+                encoder_feature_dim, actor_log_std_min, actor_log_std_max,
+                num_layers, num_filters
+            ).to(device)
 
         self.critic = Critic(
             obs_shape, action_shape, hidden_dim, encoder_type,
@@ -308,12 +324,54 @@ class SacAeAgent(object):
             )
             return mu.cpu().data.numpy().flatten()
 
-    def sample_action(self, obs):
+    def sample_action(self, obs, batch=False, grad=False):
+        if not grad:
+            with torch.no_grad():
+                obs = torch.FloatTensor(obs).to(self.device)
+                if not batch:
+                    obs = obs.unsqueeze(0)
+                mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
+                if not batch:
+                    return pi.cpu().data.numpy().flatten()
+                else:
+                    return pi
+        else:
+            obs = torch.FloatTensor(obs).to(self.device)
+            if not batch:
+                obs = obs.unsqueeze(0)
+            mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
+
+            return pi
+
+    def sample_expert_action(self, obs, batch=False):
         with torch.no_grad():
             obs = torch.FloatTensor(obs).to(self.device)
-            obs = obs.unsqueeze(0)
-            mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
-            return pi.cpu().data.numpy().flatten()
+            if not batch:
+                obs = obs.unsqueeze(0)
+            mu, pi, _, _ = self.actor_expert(obs, compute_log_pi=False)
+            if not batch:
+                return pi.cpu().data.numpy().flatten()
+            else:
+                return pi
+
+    def _add_noise_to_action(self, u):
+        # update noise
+
+        #last_noise = self.polyak_noise * self.last_noise
+        gauss_noise = (1.0 - self.polyak_noise) * \
+            self.max_u * np.random.randn(*u.shape)
+        # self.last_noise = gauss_noise + last_noise
+        # add noise to u
+        u = u + gauss_noise
+        u = np.clip(u, -self.max_u, self.max_u)
+        u += np.random.binomial(1, self.random_eps, u.shape[0]).reshape(-1, 1) * (
+            self._random_action(u.shape[0]) - u
+        )  # eps-greedy
+        # assert u.shape[0] != 1, "the output is 1, make sure that the code behaves correctly (u = u[0]?)"
+        return u
+
+    def _random_action(self, n):
+        return np.random.uniform(low=-self.max_u, high=self.max_u, size=(n, 6))
 
     def update_critic(self, obs, action, reward, next_obs, not_done, L, step):
         with torch.no_grad():
@@ -329,7 +387,6 @@ class SacAeAgent(object):
                                  target_Q) + F.mse_loss(current_Q2, target_Q)
         L.log('train_critic/loss', critic_loss, step)
 
-
         # Optimize the critic
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -342,8 +399,17 @@ class SacAeAgent(object):
         _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
 
-        actor_Q = torch.min(actor_Q1, actor_Q2)
-        actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+        # actor_Q = torch.min(actor_Q1, actor_Q2)
+        # actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+        add_noise = True
+        if self.behaviour_cloning:
+            # Just BC loss
+            obs_np = obs.cpu().data.numpy()
+            expert_action = self.sample_expert_action(obs_np, batch=True)
+            if add_noise:
+                expert_action = self._add_noise_to_action(expert_action)
+            mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
+            actor_loss = torch.mean((pi - expert_action) ** 2)
 
         L.log('train_actor/loss', actor_loss, step)
         L.log('train_actor/target_entropy', self.target_entropy, step)
@@ -439,3 +505,9 @@ class SacAeAgent(object):
             self.decoder.load_state_dict(
                 torch.load('%s/decoder_%s.pt' % (model_dir, step))
             )
+
+    def load_expert(self, model_dir, step):
+
+        self.actor_expert.load_state_dict(
+            torch.load('%s/actor_%s.pt' % (model_dir, step))
+        )
