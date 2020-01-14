@@ -67,8 +67,8 @@ def preprocess_obs(obs, bits=5):
 
 class ReplayBuffer(object):
     """Buffer to store environment transitions."""
+
     def __init__(self, obs_shape, action_shape, capacity, batch_size, device):
-        capacity = 50000
         self.capacity = capacity
         self.batch_size = batch_size
         self.device = device
@@ -153,7 +153,7 @@ class FrameStack(gym.Wrapper):
             shape=((shp[0] * k,) + shp[1:]),
             dtype=env.observation_space.dtype
         )
-        self._max_episode_steps = 1000#env._max_episode_steps
+        self._max_episode_steps = 1000  # env._max_episode_steps
 
     def reset(self):
         obs = self.env.reset()

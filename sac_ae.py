@@ -228,7 +228,7 @@ class SacAeAgent(object):
         self.critic_target_update_freq = critic_target_update_freq
         self.decoder_update_freq = decoder_update_freq
         self.decoder_latent_lambda = decoder_latent_lambda
-        self.behaviour_cloning = behaviour_cloning
+        self.b_cloning = behaviour_cloning
 
         self.polyak_noise = 0.0
         self.max_u = 1.0
@@ -240,7 +240,7 @@ class SacAeAgent(object):
             num_layers, num_filters
         ).to(device)
 
-        if self.behaviour_cloning:
+        if self.b_cloning:
             self.actor_expert = Actor(
                 obs_shape, action_shape, hidden_dim, encoder_type,
                 encoder_feature_dim, actor_log_std_min, actor_log_std_max,
@@ -324,6 +324,15 @@ class SacAeAgent(object):
             )
             return mu.cpu().data.numpy().flatten()
 
+    def select_expert_action(self, obs):
+        with torch.no_grad():
+            obs = torch.FloatTensor(obs).to(self.device)
+            obs = obs.unsqueeze(0)
+            mu, _, _, _ = self.actor_expert(
+                obs, compute_pi=False, compute_log_pi=False
+            )
+            return mu.cpu().data.numpy().flatten()
+
     def sample_action(self, obs, batch=False, grad=False):
         if not grad:
             with torch.no_grad():
@@ -394,22 +403,27 @@ class SacAeAgent(object):
 
         self.critic.log(L, step)
 
-    def update_actor_and_alpha(self, obs, L, step):
+    def update_actor_and_alpha(self, obs, L, step,
+                               demo_obs=None,
+                               demo_act=None):
         # detach encoder, so we don't update it with the actor loss
         _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
 
-        # actor_Q = torch.min(actor_Q1, actor_Q2)
-        # actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
-        add_noise = True
-        if self.behaviour_cloning:
-            # Just BC loss
-            obs_np = obs.cpu().data.numpy()
-            expert_action = self.sample_expert_action(obs_np, batch=True)
-            if add_noise:
+        actor_Q = torch.min(actor_Q1, actor_Q2)
+        actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+
+        add_demo_noise = False
+        if self.b_cloning:
+            assert demo_obs is not None \
+                and demo_act is not None
+            expert_action = demo_act
+            if add_demo_noise:
                 expert_action = self._add_noise_to_action(expert_action)
-            mu, pi, _, _ = self.actor(obs, compute_log_pi=False)
-            actor_loss = torch.mean((pi - expert_action) ** 2)
+            _, pi, _, _ = self.actor(demo_obs, compute_log_pi=False)
+            bc_loss = torch.mean((pi - expert_action) ** 2)
+            # TODO: Add appropriate weightings
+            actor_loss += bc_loss
 
         L.log('train_actor/loss', actor_loss, step)
         L.log('train_actor/target_entropy', self.target_entropy, step)
@@ -456,15 +470,25 @@ class SacAeAgent(object):
 
         self.decoder.log(L, step, log_freq=LOG_FREQ)
 
-    def update(self, replay_buffer, L, step):
+    def update(self, replay_buffer, L, step, demo_buffer=None):
+        # TODO : If bc_cloning, sample from both replay buffers
+        # Update the BC loss via demo_buffer
+        # Replay buffers should already be mixed in advance.
+        # Combine the two buffers to update the Q-loss
+
         obs, action, reward, next_obs, not_done = replay_buffer.sample()
+        if self.b_cloning:
+            demo_obs, demo_action, _, _, \
+                _ = demo_buffer.sample()
 
         L.log('train/batch_reward', reward.mean(), step)
 
         self.update_critic(obs, action, reward, next_obs, not_done, L, step)
 
         if step % self.actor_update_freq == 0:
-            self.update_actor_and_alpha(obs, L, step)
+            self.update_actor_and_alpha(obs, L, step,
+                                        demo_obs,
+                                        demo_action)
 
         if step % self.critic_target_update_freq == 0:
             utils.soft_update_params(

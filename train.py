@@ -28,6 +28,8 @@ def parse_args():
     parser.add_argument('--frame_stack', default=3, type=int)
     # replay buffer
     parser.add_argument('--replay_buffer_capacity', default=500000, type=int)
+    parser.add_argument('--demo_episodes', default=5, type=int)
+
     # train
     parser.add_argument('--agent', default='sac_ae', type=str)
     parser.add_argument('--init_steps', default=1000, type=int)
@@ -99,6 +101,30 @@ def evaluate(env, agent, video, num_episodes, L, step):
     L.dump(step)
 
 
+def generate_demo_rollout(env, actor, num_episodes, demo_buffer):
+    for i in range(num_episodes):
+        obs = env.reset()
+        done = False
+        episode_reward = 0
+        episode_step = 0
+        while not done:
+            with utils.eval_mode(actor):
+                action = actor.select_expert_action(obs)
+            next_obs, reward, done, _ = env.step(action)
+            episode_reward += reward
+
+            # allow infinit bootstrap
+            done_bool = 0 if episode_step + 1 == env._max_episode_steps else float(
+                done
+            )
+            demo_buffer.add(obs, action, reward, next_obs, done_bool)
+            obs = next_obs
+            episode_step += 1
+        print('Generated demo that got ', episode_reward, ' rewards')
+        print('-'*20)
+    return demo_buffer
+
+
 def make_agent(obs_shape, action_shape, args, device):
     if args.agent == 'sac_ae':
         return SacAeAgent(
@@ -161,6 +187,7 @@ def main():
     model_dir = utils.make_dir(os.path.join(args.work_dir, 'model'))
     buffer_dir = utils.make_dir(os.path.join(args.work_dir, 'buffer'))
 
+    b_cloning = args.bc_learning
     if args.bc_learning:
         expert_dir = utils.make_dir(os.path.join(args.expert_dir, 'model'))
 
@@ -183,6 +210,15 @@ def main():
         device=device
     )
 
+    if b_cloning:
+        demo_buffer = utils.ReplayBuffer(
+            obs_shape=env.observation_space.shape,
+            action_shape=env.action_space.shape,
+            capacity=args.demo_episodes,
+            batch_size=args.batch_size,
+            device=device
+        )
+
     agent = make_agent(
         obs_shape=env.observation_space.shape,
         action_shape=env.action_space.shape,
@@ -191,8 +227,26 @@ def main():
     )
 
     if args.bc_learning:
-        step = 160000
+        from os import listdir
+        # Get the latest model
+        all_files = listdir(expert_dir)
+        actor_models = [
+            model for model in all_files if model.startswith('actor')]
+        ids = [id.split('_')[1].split('.pt')[0]
+               for id in actor_models if id.endswith('.pt')]
+        step = max([int(id) for id in ids])
         agent.load_expert(expert_dir, step)
+        demo_buffer = generate_demo_rollout(
+            env, agent, args.demo_episodes, demo_buffer)
+
+        # Concatenate this data to the agent replay buffer
+        # TODO: Add an API for batch data adding to avoid this loop.
+        for i in range(demo_buffer.capacity):
+            obs, action, reward, next_obs, done_bool = demo_buffer.obses[i, :, :, :], \
+                demo_buffer.actions[i, :], demo_buffer.rewards[i], \
+                demo_buffer.next_obses[i, :, :, :], demo_buffer.not_dones[i]
+            # Something about reward not being added here ?
+            replay_buffer.add(obs, action, reward, next_obs, done_bool)
 
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
@@ -235,7 +289,10 @@ def main():
         if step >= args.init_steps:
             num_updates = args.init_steps if step == args.init_steps else 1
             for _ in range(num_updates):
-                agent.update(replay_buffer, L, step)
+                if not b_cloning:
+                    agent.update(replay_buffer, L, step)
+                else:
+                    agent.update(replay_buffer, L, step, demo_buffer)
 
         next_obs, reward, done, _ = env.step(action)
 
