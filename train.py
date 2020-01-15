@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument('--frame_stack', default=3, type=int)
     # replay buffer
     parser.add_argument('--replay_buffer_capacity', default=500000, type=int)
-    parser.add_argument('--demo_episodes', default=128, type=int)
+    parser.add_argument('--demo_episodes', default=50, type=int)
 
     # train
     parser.add_argument('--agent', default='sac_ae', type=str)
@@ -78,6 +78,7 @@ def parse_args():
     # Behaviour cloning
     parser.add_argument('--bc_learning', default=False, action='store_true')
     parser.add_argument('--q_filter', default=False, action='store_true')
+    parser.add_argument('--demo_noise', default=False, action='store_true')
     parser.add_argument('--expert_dir', type=str)
 
     args = parser.parse_args()

@@ -116,5 +116,9 @@ python train.py \
     --seed 1
 
 
+# Plotting
+
+python plot.py --exp_list cheetah_BC_RL cheetah_BC_RL_with_noise cheetah_BC_RL_Q_Filter cheetah_BC_RL_Q_Filter_with_noise
+
 
 

@@ -219,7 +219,8 @@ class SacAeAgent(object):
         num_layers=4,
         num_filters=32,
         behaviour_cloning=False,
-        q_filter=False
+        q_filter=False,
+        demo_noise=False
     ):
         self.device = device
         self.discount = discount
@@ -231,6 +232,7 @@ class SacAeAgent(object):
         self.decoder_latent_lambda = decoder_latent_lambda
         self.b_cloning = behaviour_cloning
         self.q_filter = q_filter
+        self.demo_noise = demo_noise
 
         self.polyak_noise = 0.0
         self.max_u = 1.0
@@ -414,12 +416,13 @@ class SacAeAgent(object):
         actor_Q = torch.min(actor_Q1, actor_Q2)
         actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
-        add_demo_noise = False
         if self.b_cloning:
             assert demo_obs is not None \
                 and demo_act is not None
-            if add_demo_noise:
+
+            if self.demo_noise:
                 demo_act = self._add_noise_to_action(demo_act)
+
             _, policy_act, _, _ = self.actor(demo_obs, compute_log_pi=False)
 
             if self.q_filter:
