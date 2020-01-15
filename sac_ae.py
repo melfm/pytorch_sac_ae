@@ -218,7 +218,8 @@ class SacAeAgent(object):
         decoder_weight_lambda=0.0,
         num_layers=4,
         num_filters=32,
-        behaviour_cloning=False
+        behaviour_cloning=False,
+        q_filter=False
     ):
         self.device = device
         self.discount = discount
@@ -229,6 +230,7 @@ class SacAeAgent(object):
         self.decoder_update_freq = decoder_update_freq
         self.decoder_latent_lambda = decoder_latent_lambda
         self.b_cloning = behaviour_cloning
+        self.q_filter = q_filter
 
         self.polyak_noise = 0.0
         self.max_u = 1.0
@@ -376,7 +378,6 @@ class SacAeAgent(object):
         u += np.random.binomial(1, self.random_eps, u.shape[0]).reshape(-1, 1) * (
             self._random_action(u.shape[0]) - u
         )  # eps-greedy
-        # assert u.shape[0] != 1, "the output is 1, make sure that the code behaves correctly (u = u[0]?)"
         return u
 
     def _random_action(self, n):
@@ -417,11 +418,25 @@ class SacAeAgent(object):
         if self.b_cloning:
             assert demo_obs is not None \
                 and demo_act is not None
-            expert_action = demo_act
             if add_demo_noise:
-                expert_action = self._add_noise_to_action(expert_action)
-            _, pi, _, _ = self.actor(demo_obs, compute_log_pi=False)
-            bc_loss = torch.mean((pi - expert_action) ** 2)
+                demo_act = self._add_noise_to_action(demo_act)
+            _, policy_act, _, _ = self.actor(demo_obs, compute_log_pi=False)
+
+            if self.q_filter:
+                qf1, qf2 = self.critic(demo_obs, demo_act)
+                q_demo_actions = torch.min(qf1, qf2).detach()
+                qf1, qf2 = self.critic(demo_obs, policy_act)
+                q_new_demo_actions = torch.min(qf1, qf2).detach()
+
+                masked_bc_loss = torch.where(
+                    q_demo_actions > q_new_demo_actions,
+                    (policy_act - demo_act) ** 2,
+                    torch.zeros_like(demo_act)
+                )
+                bc_loss = torch.mean(masked_bc_loss)
+            else:
+                bc_loss = torch.mean((policy_act - demo_act) ** 2)
+
             # TODO: Add appropriate weightings
             actor_loss += bc_loss
 

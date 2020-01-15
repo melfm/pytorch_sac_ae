@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument('--frame_stack', default=3, type=int)
     # replay buffer
     parser.add_argument('--replay_buffer_capacity', default=500000, type=int)
-    parser.add_argument('--demo_episodes', default=5, type=int)
+    parser.add_argument('--demo_episodes', default=128, type=int)
 
     # train
     parser.add_argument('--agent', default='sac_ae', type=str)
@@ -77,6 +77,7 @@ def parse_args():
 
     # Behaviour cloning
     parser.add_argument('--bc_learning', default=False, action='store_true')
+    parser.add_argument('--q_filter', default=False, action='store_true')
     parser.add_argument('--expert_dir', type=str)
 
     args = parser.parse_args()
@@ -120,8 +121,8 @@ def generate_demo_rollout(env, actor, num_episodes, demo_buffer):
             demo_buffer.add(obs, action, reward, next_obs, done_bool)
             obs = next_obs
             episode_step += 1
-        print('Generated demo that got ', episode_reward, ' rewards')
-        print('-'*20)
+        # print('Generated demo that got ', episode_reward, ' rewards')
+        # print('-'*20)
     return demo_buffer
 
 
@@ -156,7 +157,8 @@ def make_agent(obs_shape, action_shape, args, device):
             decoder_weight_lambda=args.decoder_weight_lambda,
             num_layers=args.num_layers,
             num_filters=args.num_filters,
-            behaviour_cloning=args.bc_learning
+            behaviour_cloning=args.bc_learning,
+            q_filter=args.q_filter
         )
     else:
         assert 'agent is not supported: %s' % args.agent
@@ -238,15 +240,6 @@ def main():
         agent.load_expert(expert_dir, step)
         demo_buffer = generate_demo_rollout(
             env, agent, args.demo_episodes, demo_buffer)
-
-        # Concatenate this data to the agent replay buffer
-        # TODO: Add an API for batch data adding to avoid this loop.
-        for i in range(demo_buffer.capacity):
-            obs, action, reward, next_obs, done_bool = demo_buffer.obses[i, :, :, :], \
-                demo_buffer.actions[i, :], demo_buffer.rewards[i], \
-                demo_buffer.next_obses[i, :, :, :], demo_buffer.not_dones[i]
-            # Something about reward not being added here ?
-            replay_buffer.add(obs, action, reward, next_obs, done_bool)
 
     L = Logger(args.work_dir, use_tb=args.save_tb)
 
