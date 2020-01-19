@@ -104,6 +104,7 @@ def evaluate(env, agent, video, num_episodes, L, step):
 
 
 def generate_demo_rollout(env, actor, num_episodes, demo_buffer):
+    print('Generating demonstrations for %i eps' % num_episodes)
     for i in range(num_episodes):
         obs = env.reset()
         done = False

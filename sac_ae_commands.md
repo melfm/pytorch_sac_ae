@@ -23,12 +23,11 @@ python train.py \
     --encoder_type pixel \
     --decoder_type pixel \
     --action_repeat 4 \
-    --save_video \
     --save_tb \
     --save_model \
     --work_dir ./cheetah_BC_RL \
     --expert_dir ./half_cheetah_expert \
-    --bc_learning
+    --bc_learning \
     --seed 1
 
 
@@ -38,12 +37,11 @@ python train.py \
     --encoder_type pixel \
     --decoder_type pixel \
     --action_repeat 4 \
-    --save_video \
     --save_tb \
     --save_model \
     --work_dir ./cheetah_BC_RL_with_noise \
     --expert_dir ./half_cheetah_expert \
-    --bc_learning
+    --bc_learning \
     --demo_noise \
     --seed 1
 
@@ -55,7 +53,6 @@ python train.py \
     --encoder_type pixel \
     --decoder_type pixel \
     --action_repeat 4 \
-    --save_video \
     --save_tb \
     --save_model \
     --work_dir ./cheetah_BC_RL_Q_Filter \
