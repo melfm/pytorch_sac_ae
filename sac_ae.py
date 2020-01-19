@@ -220,7 +220,8 @@ class SacAeAgent(object):
         num_filters=32,
         behaviour_cloning=False,
         q_filter=False,
-        demo_noise=False
+        demo_noise=False,
+        bc_only=False
     ):
         self.device = device
         self.discount = discount
@@ -233,6 +234,8 @@ class SacAeAgent(object):
         self.b_cloning = behaviour_cloning
         self.q_filter = q_filter
         self.demo_noise = demo_noise
+        # Only evaluate behavioral cloning loss
+        self.bc_only = bc_only
 
         self.polyak_noise = 0.0
         self.max_u = 1.0
@@ -413,8 +416,9 @@ class SacAeAgent(object):
         _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
 
-        actor_Q = torch.min(actor_Q1, actor_Q2)
-        actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+        if not self.bc_only:
+            actor_Q = torch.min(actor_Q1, actor_Q2)
+            actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
         if self.b_cloning:
             assert demo_obs is not None \
@@ -441,7 +445,10 @@ class SacAeAgent(object):
                 bc_loss = torch.mean((policy_act - demo_act) ** 2)
 
             # TODO: Add appropriate weightings
-            actor_loss += bc_loss
+            if self.bc_only:
+                actor_loss = bc_loss
+            else:
+                actor_loss += bc_loss
 
         L.log('train_actor/loss', actor_loss, step)
         L.log('train_actor/target_entropy', self.target_entropy, step)

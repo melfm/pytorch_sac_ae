@@ -1,19 +1,33 @@
 # Half-Cheetah
 ################################
 
-# TODO: Its not optional atm
 python train.py \
     --domain_name cheetah \
     --task_name run \
     --encoder_type pixel \
     --decoder_type pixel \
     --action_repeat 4 \
-    --save_video \
     --save_tb \
     --save_model \
     --work_dir ./cheetah_BC_Only \
     --expert_dir ./half_cheetah_expert \
-    --bc_learning
+    --bc_learning \
+    --bc_only \
+    --seed 1
+
+python train.py \
+    --domain_name cheetah \
+    --task_name run \
+    --encoder_type pixel \
+    --decoder_type pixel \
+    --action_repeat 4 \
+    --save_tb \
+    --save_model \
+    --work_dir ./cheetah_BC_Only \
+    --expert_dir ./half_cheetah_expert \
+    --bc_learning \
+    --bc_only \
+    --demo_noise \
     --seed 1
 
 

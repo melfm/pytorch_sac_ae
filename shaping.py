@@ -70,8 +70,8 @@ class ImgGANShaping(Shaping):
         self.channel = 3  # use 4 when using RGBD input
 
         # Normalizer for goal and observation.
-        self.o_stats = Normalizer(self.dimo, norm_eps, norm_clip).to(device)
-        self.g_stats = Normalizer(self.dimg, norm_eps, norm_clip).to(device)
+        # self.o_stats = Normalizer(self.dimo, norm_eps, norm_clip).to(device)
+        # self.g_stats = Normalizer(self.dimg, norm_eps, norm_clip).to(device)
 
         # state_dim = self.dimo[0] + self.dimg[0] + self.dimu[0]
         state_dim = (self.channel, 32, 32)
@@ -92,19 +92,19 @@ class ImgGANShaping(Shaping):
     def train(self, batch):
 
         o_tc = torch.FloatTensor(batch["o"]).to(device)
-        g_tc = torch.FloatTensor(batch["g"]).to(device)
+        # g_tc = torch.FloatTensor(batch["g"]).to(device)
         u_tc = torch.FloatTensor(batch["u"]).to(device)
 
-        import pdb
-        # pdb.set_trace()
         images = o_tc
 
         u_tc = u_tc / self.max_u
+        # Note : Make sure images aren't already normalized.
+        # data_loader already normalizes these for instance.
         # normalize the images with depth
         # images[:, :3, ...] = images[:, :3, ...].div(255.0 / 2).add(-1.0)
         # images[:, 3:4, ...] = (images[:, 3:4, ...] - images[:, 3:4, ...].mean()) / images[:, 3:4, ...].var()
         # normalize the image without depth
-        images = images[:, :3, ...].div(255.0 / 2).add(-1.0)
+        # images = images[:, :3, ...].div(255.0 / 2).add(-1.0)
 
         # Train discriminator
         # requires grad, Generator requires_grad = False
@@ -178,21 +178,23 @@ class ImgGANShaping(Shaping):
         potential = potential * self.potential_weight
         return potential
 
-    def evaluate(self):
+    def evaluate(self, img_dir, step):
         n = 16
         z = torch.randn(n, self.latent_dim, 1, 1).to(device)
         samples = self.G(z)
+        # change output from (-1, 1) to (0, 1)
         samples = samples.mul(0.5).add(0.5)
         samples = samples.data.cpu()
         grid = utils.make_grid(samples[:, :3, ...])
-        print("Grid of 8x8 images saved to 'dgan_model_image.png'.")
-        utils.save_image(grid, "dgan_model_image.png")
+        img_file = img_dir + \
+            "/fake_image_grid_" + str(step) + ".png"
+        utils.save_image(grid, img_file)
 
-    def real_images(self, images, number_of_images):
-        if self.C == 3:
-            return images.view(-1, self.C, 32, 32)[: self.number_of_images].data.cpu().numpy()
-        else:
-            return images.view(-1, 32, 32)[: self.number_of_images].data.cpu().numpy()
+    # def real_images(self, images, number_of_images):
+    #     if self.C == 3:
+    #         return images.view(-1, self.C, 32, 32)[: self.number_of_images].data.cpu().numpy()
+    #     else:
+    #         return images.view(-1, 32, 32)[: self.number_of_images].data.cpu().numpy()
 
     def generate_img(self, z, number_of_images):
         samples = self.G(z).data.cpu().numpy()[:number_of_images]
@@ -204,27 +206,43 @@ class ImgGANShaping(Shaping):
                 generated_images.append(sample.reshape(32, 32))
         return generated_images
 
-    def __getstate__(self):
-        """
-        Our policies can be loaded from pkl, but after unpickling you cannot continue training.
-        """
-        state = {k: v for k, v in self.init_args.items() if not k == "self"}
-        state["tc"] = {
-            "o_stats": self.o_stats.state_dict(),
-            "g_stats": self.g_stats.state_dict(),
-            "D": self.D.state_dict(),
-            "G": self.G.state_dict(),
-            "d_optimizer": self.d_optimizer.state_dict(),
-            "g_optimizer": self.g_optimizer.state_dict(),
-        }
-        return state
+    # def __getstate__(self):
+    #     """
+    #     Our policies can be loaded from pkl, but after unpickling you cannot continue training.
+    #     """
+    #     state = {k: v for k, v in self.init_args.items() if not k == "self"}
+    #     state["tc"] = {
+    #         "o_stats": self.o_stats.state_dict(),
+    #         "g_stats": self.g_stats.state_dict(),
+    #         "D": self.D.state_dict(),
+    #         "G": self.G.state_dict(),
+    #         "d_optimizer": self.d_optimizer.state_dict(),
+    #         "g_optimizer": self.g_optimizer.state_dict(),
+    #     }
+    #     return state
 
-    def __setstate__(self, state):
-        state_dicts = state.pop("tc")
-        self.__init__(**state)
-        self.o_stats.load_state_dict(state_dicts["o_stats"])
-        self.g_stats.load_state_dict(state_dicts["g_stats"])
-        self.D.load_state_dict(state_dicts["D"])
-        self.G.load_state_dict(state_dicts["G"])
-        self.d_optimizer.load_state_dict(state_dicts["d_optimizer"])
-        self.g_optimizer.load_state_dict(state_dicts["g_optimizer"])
+    # def __setstate__(self, state):
+    #     state_dicts = state.pop("tc")
+    #     self.__init__(**state)
+    #     self.o_stats.load_state_dict(state_dicts["o_stats"])
+    #     self.g_stats.load_state_dict(state_dicts["g_stats"])
+    #     self.D.load_state_dict(state_dicts["D"])
+    #     self.G.load_state_dict(state_dicts["G"])
+    #     self.d_optimizer.load_state_dict(state_dicts["d_optimizer"])
+    #     self.g_optimizer.load_state_dict(state_dicts["g_optimizer"])
+
+    def save(self, model_dir, step):
+        torch.save(
+            self.D.state_dict(), '%s/discriminator_%s.pt' % (model_dir, step)
+        )
+        torch.save(
+            self.G.state_dict(), '%s/generator%s.pt' % (model_dir, step)
+        )
+
+    def load(self, model_dir, step):
+        self.D.load_state_dict(
+            torch.load('%s/discriminator_%s.pt' % (model_dir, step))
+        )
+        self.G.load_state_dict(
+            torch.load('%s/generator%s.pt' % (model_dir, step))
+        )

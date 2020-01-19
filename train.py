@@ -80,6 +80,7 @@ def parse_args():
     parser.add_argument('--q_filter', default=False, action='store_true')
     parser.add_argument('--demo_noise', default=False, action='store_true')
     parser.add_argument('--expert_dir', type=str)
+    parser.add_argument('--bc_only', default=False, action='store_true')
 
     args = parser.parse_args()
     return args
@@ -105,7 +106,8 @@ def evaluate(env, agent, video, num_episodes, L, step):
 
 def generate_demo_rollout(env, actor, num_episodes, demo_buffer):
     print('Generating demonstrations for %i eps' % num_episodes)
-    for i in range(num_episodes):
+    avg_expert_rewards = []
+    for _ in range(num_episodes):
         obs = env.reset()
         done = False
         episode_reward = 0
@@ -123,8 +125,10 @@ def generate_demo_rollout(env, actor, num_episodes, demo_buffer):
             demo_buffer.add(obs, action, reward, next_obs, done_bool)
             obs = next_obs
             episode_step += 1
+        avg_expert_rewards.append(episode_reward)
         # print('Generated demo that got ', episode_reward, ' rewards')
         # print('-'*20)
+    print('Avg expert performance reward : ', np.mean(avg_expert_rewards))
     return demo_buffer
 
 
@@ -160,7 +164,8 @@ def make_agent(obs_shape, action_shape, args, device):
             num_layers=args.num_layers,
             num_filters=args.num_filters,
             behaviour_cloning=args.bc_learning,
-            q_filter=args.q_filter
+            q_filter=args.q_filter,
+            bc_only=args.bc_only
         )
     else:
         assert 'agent is not supported: %s' % args.agent

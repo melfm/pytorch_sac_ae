@@ -1,10 +1,14 @@
 import argparse
 import numpy as np
-from data_loader import get_data_loader
+import os
+import utils
 
+from os import listdir
+
+from data_loader import get_data_loader
 from shaping import ImgGANShaping
 
-from torchvision import utils
+from torchvision import utils as torch_utils
 
 
 def get_infinite_batches(data_loader):
@@ -27,22 +31,42 @@ def main(args):
     )
 
     # Load datasets to train and test loaders
-    train_loader, test_loader = get_data_loader(args)
-    # feature_extraction = FeatureExtractionTest(train_loader, test_loader, args.cuda, args.batch_size)
+    train_loader, _ = get_data_loader(args)
+    model_dir = utils.make_dir(os.path.join(args.work_dir, 'model'))
+    img_dir = utils.make_dir(os.path.join(args.work_dir, 'images'))
+    real_images = utils.make_dir(os.path.join(img_dir, 'real'))
+    generated_images = utils.make_dir(os.path.join(img_dir, 'fake'))
+
+    training_step = 0
+    if args.restore:
+        # Get the latest model
+        all_files = listdir(model_dir)
+        disc_models = [
+            model for model in all_files if model.startswith('discriminator')]
+        ids = [id.split('_')[1].split('.pt')[0]
+               for id in disc_models if id.endswith('.pt')]
+        step = max([int(id) for id in ids])
+        training_step = step
+        model.load(model_dir, step)
+        print('Continuing from training step ', training_step)
 
     train_loader = get_infinite_batches(train_loader)
-    for i in range(args.generator_iters):
+    for i in range(training_step, args.generator_iters):
         images = train_loader.__next__()
         dloss, gloss = model.train(
             {"o": images, "g": np.empty(
                 (args.batch_size, 0)), "u": np.empty((args.batch_size, 0))}
         )
         if i % 100 == 0:
-            model.evaluate()
-            grid = utils.make_grid(images)
-            # print("Grid of 8x8 images saved to 'dgan_model_image.png'.")
-            utils.save_image(grid, "dgan_model_image_grid_V2.png")
-            print('Disc loss: ', dloss)
+            model.evaluate(generated_images, i)
+            grid = torch_utils.make_grid(images)
+            img_file = real_images + \
+                "/real_image_grid_" + str(i) + ".png"
+            torch_utils.save_image(grid, img_file)
+            print('Discriminator loss: ', dloss.item())
+            print('Generator loss: ', gloss)
+            # Store the model
+            model.save(model_dir, i)
 
 
 if __name__ == "__main__":
@@ -54,7 +78,8 @@ if __name__ == "__main__":
                --dataset cifar \
                --generator_iters 40000 \
                --cuda True \
-               --batch_size 64
+               --batch_size 64 \
+               --work_dir gan_image_exp
     """
     parser = argparse.ArgumentParser()
     # environment
@@ -63,6 +88,8 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', default='cifar')
     parser.add_argument('--dataroot', default='GAN_exps/datasets/cifar')
     parser.add_argument('--download', default=False, action='store_true')
+    parser.add_argument('--work_dir', type=str, default='gan_image_exp')
+    parser.add_argument('--restore', default=False, action='store_true')
 
     args = parser.parse_args()
     main(args)
