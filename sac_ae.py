@@ -416,17 +416,21 @@ class SacAeAgent(object):
         _, pi, log_pi, log_std = self.actor(obs, detach_encoder=True)
         actor_Q1, actor_Q2 = self.critic(obs, pi, detach_encoder=True)
 
-        if not self.bc_only:
-            actor_Q = torch.min(actor_Q1, actor_Q2)
-            actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
+        # TODO: Needs to be evaluated on current observation
+        # if not self.bc_only:
+        actor_Q = torch.min(actor_Q1, actor_Q2)
+        actor_loss = (self.alpha.detach() * log_pi - actor_Q).mean()
 
+        obs_np = demo_obs.cpu().data.numpy()
+        # This should be equivalent to demo_act sampled from
+        # demo buffer
+        demo_act = self.sample_expert_action(obs_np, batch=True)
         if self.b_cloning:
             assert demo_obs is not None \
                 and demo_act is not None
 
             if self.demo_noise:
                 demo_act = self._add_noise_to_action(demo_act)
-
             _, policy_act, _, _ = self.actor(demo_obs, compute_log_pi=False)
 
             if self.q_filter:
@@ -444,11 +448,11 @@ class SacAeAgent(object):
             else:
                 bc_loss = torch.mean((policy_act - demo_act) ** 2)
 
+            # if self.bc_only:
+            #     actor_loss = bc_loss
+            # else:
             # TODO: Add appropriate weightings
-            if self.bc_only:
-                actor_loss = bc_loss
-            else:
-                actor_loss += bc_loss
+            actor_loss += bc_loss
 
         L.log('train_actor/loss', actor_loss, step)
         L.log('train_actor/target_entropy', self.target_entropy, step)
